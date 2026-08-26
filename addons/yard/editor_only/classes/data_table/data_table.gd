@@ -1185,68 +1185,31 @@ func _handle_header_double_click(mouse_pos: Vector2) -> void:
 
 
 func _handle_key_input(event: InputEventKey) -> void:
-	var is_shift := event.is_shift_pressed()
-	var is_ctrl_cmd := event.is_ctrl_pressed() or event.is_meta_pressed()
 	var is_cell_focused := focused_row != &"" and focused_col != &""
 
-	var focused_idx := _order.find(focused_row) if focused_row != &"" else -1
+	# Only used by actions that call _navigate_to()
+	var is_shift := event.is_shift_pressed()
+	var is_ctrl_cmd := event.is_ctrl_pressed() or event.is_meta_pressed()
+	var focused_row_idx := _order.find(focused_row) if focused_row != &"" else -1
 	var focused_col_idx := _get_column_index(focused_col) if focused_col != &"" else -1
-	var new_idx := focused_idx
-	var new_col_idx := focused_col_idx
 
 	if event.is_action_pressed(&"ui_accept"):
 		if not is_cell_focused:
 			return
 		if not _dispatch_cell_input(event, focused_row, focused_col):
 			_start_cell_editing(focused_row, focused_col)
-		_finalize_key_operation()
-		return
+
 	elif event.is_action_pressed(&"ui_text_select_all"):
-		if not _order.is_empty():
-			select_all_rows()
-			multiple_rows_selected.emit(selected_rows)
-			_finalize_key_operation()
+		if _order.is_empty():
 			return
+		select_all_rows()
+		multiple_rows_selected.emit(selected_rows)
+
 	elif event.is_action_pressed(&"ui_cancel"):
 		if selected_rows.is_empty() and focused_row == &"":
 			return
 		set_selected_cell(&"", &"")
-		_finalize_key_operation()
-		return
-	elif event.is_action_pressed(&"ui_home"):
-		if _order.is_empty():
-			return
-		new_idx = 0
-		new_col_idx = 0 if not _columns.is_empty() else -1
-	elif event.is_action_pressed(&"ui_end"):
-		if _order.is_empty():
-			return
-		new_idx = _order.size() - 1
-		new_col_idx = _columns.size() - 1 if not _columns.is_empty() else -1
-	elif event.is_action_pressed(&"ui_up"):
-		if not is_cell_focused:
-			return
-		new_idx = maxi(0, focused_idx - 1)
-	elif event.is_action_pressed(&"ui_down"):
-		if not is_cell_focused:
-			return
-		new_idx = mini(_order.size() - 1, focused_idx + 1)
-	elif event.is_action_pressed(&"ui_left"):
-		if not is_cell_focused:
-			return
-		new_col_idx = maxi(0, focused_col_idx - 1)
-	elif event.is_action_pressed(&"ui_right"):
-		if not is_cell_focused:
-			return
-		new_col_idx = mini(_columns.size() - 1, focused_col_idx + 1)
-	elif event.is_action_pressed(&"ui_page_up"):
-		if not is_cell_focused:
-			return
-		new_idx = maxi(0, focused_idx - _page_row_count())
-	elif event.is_action_pressed(&"ui_page_down"):
-		if not is_cell_focused:
-			return
-		new_idx = mini(_order.size() - 1, focused_idx + _page_row_count())
+
 	elif event.is_action_pressed(&"ui_select"):
 		if not is_cell_focused:
 			return
@@ -1256,48 +1219,89 @@ func _handle_key_input(event: InputEventKey) -> void:
 			selected_rows.append(focused_row)
 		_anchor_row = focused_row
 		cell_selected.emit(focused_row, focused_col)
-		_finalize_key_operation()
-		return
+
+	elif event.is_action_pressed(&"ui_home"):
+		if _order.is_empty():
+			return
+		var new_row_idx := 0 if not _order.is_empty() else -1
+		var new_col_idx := 0 if not _columns.is_empty() else -1
+		_navigate_to(new_row_idx, new_col_idx, is_shift, is_ctrl_cmd)
+
+	elif event.is_action_pressed(&"ui_end"):
+		if _order.is_empty():
+			return
+		var new_row_idx := _order.size() - 1
+		var new_col_idx := _columns.size() - 1
+		_navigate_to(new_row_idx, new_col_idx, is_shift, is_ctrl_cmd)
+
+	elif event.is_action_pressed(&"ui_up"):
+		if not is_cell_focused:
+			return
+		var new_row_idx := maxi(0, focused_row_idx - 1)
+		_navigate_to(new_row_idx, focused_col_idx, is_shift, is_ctrl_cmd)
+
+	elif event.is_action_pressed(&"ui_down"):
+		if not is_cell_focused:
+			return
+		var new_row_idx := mini(_order.size() - 1, focused_row_idx + 1)
+		_navigate_to(new_row_idx, focused_col_idx, is_shift, is_ctrl_cmd)
+
+	elif event.is_action_pressed(&"ui_left"):
+		if not is_cell_focused:
+			return
+		var new_col_idx: = maxi(0, focused_col_idx - 1)
+		_navigate_to(focused_row_idx, new_col_idx, is_shift, is_ctrl_cmd)
+
+	elif event.is_action_pressed(&"ui_right"):
+		if not is_cell_focused:
+			return
+		var new_col_idx := mini(_columns.size() - 1, focused_col_idx + 1)
+		_navigate_to(focused_row_idx, new_col_idx, is_shift, is_ctrl_cmd)
+
+	elif event.is_action_pressed(&"ui_page_up"):
+		if not is_cell_focused:
+			return
+		var new_row_idx := maxi(0, focused_row_idx - _page_row_count())
+		_navigate_to(new_row_idx, focused_col_idx, is_shift, is_ctrl_cmd)
+
+	elif event.is_action_pressed(&"ui_page_down"):
+		if not is_cell_focused:
+			return
+		var new_row_idx := mini(_order.size() - 1, focused_row_idx + _page_row_count())
+		_navigate_to(new_row_idx, focused_col_idx, is_shift, is_ctrl_cmd)
+
 	else:
 		return
 
-	var new_row := _order[new_idx] if new_idx >= 0 and new_idx < _order.size() else &""
-	var new_col := _columns[new_col_idx].identifier if new_col_idx >= 0 and new_col_idx < _columns.size() else &""
-	var old_row := focused_row
-	var old_col := focused_col
-	focused_row = new_row
-	focused_col = new_col
-
-	_update_selection_after_navigation(old_row, focused_idx, is_shift, is_ctrl_cmd)
-
-	if focused_row != &"":
-		_ensure_row_visible(focused_row)
-		_ensure_col_visible(focused_col)
-
-	if old_row != focused_row or old_col != focused_col:
-		cell_selected.emit(focused_row, focused_col)
-
-	_finalize_key_operation()
+	queue_redraw()
+	get_viewport().set_input_as_handled()
 
 
 func _page_row_count() -> int:
 	return maxi(1, floori((size.y - header_height) / row_height) if row_height > 0 else 10)
 
 
-func _update_selection_after_navigation(old_row: StringName, _old_idx: int, is_shift: bool, is_ctrl_cmd: bool) -> void:
+func _navigate_to(new_idx: int, new_col_idx: int, is_shift: bool, is_ctrl_cmd: bool) -> void:
+	var new_row := _order[new_idx] if new_idx >= 0 and new_idx < _order.size() else &""
+	var new_col := _columns[new_col_idx].identifier if new_col_idx >= 0 and new_col_idx < _columns.size() else &""
+	var old_row := focused_row
+	var old_col := focused_col
+
+	focused_row = new_row
+	focused_col = new_col
+
 	if is_shift:
 		if _anchor_row == &"":
 			_anchor_row = old_row if old_row != &"" else (_order[0] if not _order.is_empty() else &"")
-		if focused_row == &"":
-			return
-		var anchor_idx := _order.find(_anchor_row)
-		var focus_idx := _order.find(focused_row)
-		selected_rows.clear()
-		for i in range(mini(anchor_idx, focus_idx), maxi(anchor_idx, focus_idx) + 1):
-			if i >= 0 and i < _order.size():
-				selected_rows.append(_order[i])
-		if selected_rows.size() > 1:
-			multiple_rows_selected.emit(selected_rows)
+		if focused_row != &"":
+			var anchor_idx := _order.find(_anchor_row)
+			var focus_idx := _order.find(focused_row)
+			selected_rows.clear()
+			for i in range(mini(anchor_idx, focus_idx), maxi(anchor_idx, focus_idx) + 1):
+				if i >= 0 and i < _order.size():
+					selected_rows.append(_order[i])
+			if selected_rows.size() > 1:
+				multiple_rows_selected.emit(selected_rows)
 	elif is_ctrl_cmd:
 		pass
 	else:
@@ -1309,10 +1313,12 @@ func _update_selection_after_navigation(old_row: StringName, _old_idx: int, is_s
 			selected_rows.clear()
 			_anchor_row = &""
 
+	if focused_row != &"":
+		_ensure_row_visible(focused_row)
+		_ensure_col_visible(focused_col)
 
-func _finalize_key_operation() -> void:
-	queue_redraw()
-	get_viewport().set_input_as_handled()
+	if old_row != focused_row or old_col != focused_col:
+		cell_selected.emit(focused_row, focused_col)
 
 
 func _apply_pan_axis(delta: float, scroll: ScrollBar, axis: int) -> void:
