@@ -83,7 +83,6 @@ var n_frozen_columns: int = 0 ## Derived value
 # Scrolling
 var _h_scroll: HScrollBar
 var _v_scroll: VScrollBar
-var _h_scroll_position := 0
 var _visible_rows_range: Array[int] = [0, 0]
 
 # Column resizing (dragging a header divider)
@@ -188,7 +187,7 @@ func _draw() -> void:
 
 	var frozen_w := _get_frozen_width()
 	_style.frozen_width = frozen_w
-	var scroll_x := frozen_w - _h_scroll_position
+	var scroll_x := frozen_w - _h_scroll.value
 	var vis_w := size.x - (_v_scroll.size.x if _v_scroll.visible else 0.0)
 	var y_offset := header_height
 	RenderingServer.canvas_item_set_clip(_pixelated_canvas_rid, true)
@@ -503,7 +502,7 @@ func _setup_components() -> void:
 	_h_scroll = HScrollBar.new()
 	_h_scroll.set_anchors_and_offsets_preset(PRESET_BOTTOM_WIDE)
 	_h_scroll.offset_top = -8 * get_theme_default_base_scale()
-	_h_scroll.value_changed.connect(_on_h_scroll_changed)
+	_h_scroll.value_changed.connect(_on_h_scroll_value_changed)
 
 	_v_scroll = VScrollBar.new()
 	_v_scroll.set_anchors_and_offsets_preset(PRESET_RIGHT_WIDE)
@@ -833,7 +832,7 @@ func _get_col_at_x(x: float) -> int:
 			col_x += _columns[col_idx].current_width
 		return -1
 
-	col_x = frozen_w - _h_scroll_position
+	col_x = frozen_w - _h_scroll.value
 	for col_idx in range(n_frozen_columns, _columns.size()):
 		var col_end := col_x + _columns[col_idx].current_width
 		if x >= maxf(col_x, frozen_w) and x < col_end:
@@ -863,7 +862,7 @@ func _get_col_x_pos(col_idx: int) -> float:
 			x += _columns[i].current_width
 		return x
 	else:
-		var x := _get_frozen_width() - _h_scroll_position
+		var x := _get_frozen_width() - _h_scroll.value
 		for i in range(n_frozen_columns, col_idx):
 			x += _columns[i].current_width
 		return x
@@ -996,13 +995,17 @@ func _handle_mouse_button(event: InputEventMouseButton) -> void:
 			MOUSE_BUTTON_RIGHT:
 				_handle_right_click(event.position)
 			MOUSE_BUTTON_WHEEL_UP:
-				_v_scroll.value = maxf(0.0, _v_scroll.value - _v_scroll.step)
+				if not _current_editor_node:
+					_v_scroll.value = maxf(0.0, _v_scroll.value - _v_scroll.step)
 			MOUSE_BUTTON_WHEEL_DOWN:
-				_v_scroll.value = minf(_v_scroll.max_value, _v_scroll.value + _v_scroll.step)
+				if not _current_editor_node:
+					_v_scroll.value = minf(_v_scroll.max_value, _v_scroll.value + _v_scroll.step)
 			MOUSE_BUTTON_WHEEL_LEFT:
-				_h_scroll.value = maxf(0.0, _h_scroll.value - _v_scroll.step)
+				if not _current_editor_node:
+					_h_scroll.value = maxf(0.0, _h_scroll.value - _v_scroll.step)
 			MOUSE_BUTTON_WHEEL_RIGHT:
-				_h_scroll.value = minf(_h_scroll.max_value, _h_scroll.value + _v_scroll.step)
+				if not _current_editor_node:
+					_h_scroll.value = minf(_h_scroll.max_value, _h_scroll.value + _v_scroll.step)
 	else:
 		match event.button_index:
 			MOUSE_BUTTON_LEFT:
@@ -1182,13 +1185,6 @@ func _handle_header_double_click(mouse_pos: Vector2) -> void:
 
 
 func _handle_key_input(event: InputEventKey) -> void:
-	if _current_editor_node != null and _current_editor_node is LineEdit:
-		if event.keycode == KEY_ESCAPE:
-			_finish_editing(false)
-			get_viewport().set_input_as_handled()
-		return
-
-	var keycode := event.keycode
 	var is_shift := event.is_shift_pressed()
 	var is_ctrl_cmd := event.is_ctrl_pressed() or event.is_meta_pressed()
 	var is_cell_focused := focused_row != &"" and focused_col != &""
@@ -1198,73 +1194,72 @@ func _handle_key_input(event: InputEventKey) -> void:
 	var new_idx := focused_idx
 	var new_col_idx := focused_col_idx
 
-	match keycode:
-		KEY_ENTER, KEY_KP_ENTER:
-			if not is_cell_focused:
-				return
-			if not _dispatch_cell_input(event, focused_row, focused_col):
-				_start_cell_editing(focused_row, focused_col)
+	if event.is_action_pressed(&"ui_accept"):
+		if not is_cell_focused:
+			return
+		if not _dispatch_cell_input(event, focused_row, focused_col):
+			_start_cell_editing(focused_row, focused_col)
+		_finalize_key_operation()
+		return
+	elif event.is_action_pressed(&"ui_text_select_all"):
+		if not _order.is_empty():
+			select_all_rows()
+			multiple_rows_selected.emit(selected_rows)
 			_finalize_key_operation()
 			return
-		KEY_A:
-			if is_ctrl_cmd and not _order.is_empty():
-				select_all_rows()
-				multiple_rows_selected.emit(selected_rows)
-				_finalize_key_operation()
+	elif event.is_action_pressed(&"ui_cancel"):
+		if selected_rows.is_empty() and focused_row == &"":
 			return
-		KEY_ESCAPE:
-			if selected_rows.is_empty() and focused_row == &"":
-				return
-			set_selected_cell(&"", &"")
-			_finalize_key_operation()
+		set_selected_cell(&"", &"")
+		_finalize_key_operation()
+		return
+	elif event.is_action_pressed(&"ui_home"):
+		if _order.is_empty():
 			return
-		KEY_HOME:
-			if _order.is_empty():
-				return
-			new_idx = 0
-			new_col_idx = 0 if not _columns.is_empty() else -1
-		KEY_END:
-			if _order.is_empty():
-				return
-			new_idx = _order.size() - 1
-			new_col_idx = _columns.size() - 1 if not _columns.is_empty() else -1
-		KEY_UP:
-			if not is_cell_focused:
-				return
-			new_idx = maxi(0, focused_idx - 1)
-		KEY_DOWN:
-			if not is_cell_focused:
-				return
-			new_idx = mini(_order.size() - 1, focused_idx + 1)
-		KEY_LEFT:
-			if not is_cell_focused:
-				return
-			new_col_idx = maxi(0, focused_col_idx - 1)
-		KEY_RIGHT:
-			if not is_cell_focused:
-				return
-			new_col_idx = mini(_columns.size() - 1, focused_col_idx + 1)
-		KEY_PAGEUP:
-			if not is_cell_focused:
-				return
-			new_idx = maxi(0, focused_idx - _page_row_count())
-		KEY_PAGEDOWN:
-			if not is_cell_focused:
-				return
-			new_idx = mini(_order.size() - 1, focused_idx + _page_row_count())
-		KEY_SPACE:
-			if not is_cell_focused or not is_ctrl_cmd:
-				return
-			if selected_rows.has(focused_row):
-				selected_rows.erase(focused_row)
-			else:
-				selected_rows.append(focused_row)
-			_anchor_row = focused_row
-			cell_selected.emit(focused_row, focused_col)
-			_finalize_key_operation()
+		new_idx = 0
+		new_col_idx = 0 if not _columns.is_empty() else -1
+	elif event.is_action_pressed(&"ui_end"):
+		if _order.is_empty():
 			return
-		_:
+		new_idx = _order.size() - 1
+		new_col_idx = _columns.size() - 1 if not _columns.is_empty() else -1
+	elif event.is_action_pressed(&"ui_up"):
+		if not is_cell_focused:
 			return
+		new_idx = maxi(0, focused_idx - 1)
+	elif event.is_action_pressed(&"ui_down"):
+		if not is_cell_focused:
+			return
+		new_idx = mini(_order.size() - 1, focused_idx + 1)
+	elif event.is_action_pressed(&"ui_left"):
+		if not is_cell_focused:
+			return
+		new_col_idx = maxi(0, focused_col_idx - 1)
+	elif event.is_action_pressed(&"ui_right"):
+		if not is_cell_focused:
+			return
+		new_col_idx = mini(_columns.size() - 1, focused_col_idx + 1)
+	elif event.is_action_pressed(&"ui_page_up"):
+		if not is_cell_focused:
+			return
+		new_idx = maxi(0, focused_idx - _page_row_count())
+	elif event.is_action_pressed(&"ui_page_down"):
+		if not is_cell_focused:
+			return
+		new_idx = mini(_order.size() - 1, focused_idx + _page_row_count())
+	elif event.is_action_pressed(&"ui_select"):
+		if not is_cell_focused:
+			return
+		if selected_rows.has(focused_row):
+			selected_rows.erase(focused_row)
+		else:
+			selected_rows.append(focused_row)
+		_anchor_row = focused_row
+		cell_selected.emit(focused_row, focused_col)
+		_finalize_key_operation()
+		return
+	else:
+		return
 
 	var new_row := _order[new_idx] if new_idx >= 0 and new_idx < _order.size() else &""
 	var new_col := _columns[new_col_idx].identifier if new_col_idx >= 0 and new_col_idx < _columns.size() else &""
@@ -1327,7 +1322,8 @@ func _apply_pan_axis(delta: float, scroll: ScrollBar, axis: int) -> void:
 		_pan_delta_accumulation[axis] = 0.0
 	_pan_delta_accumulation[axis] += delta
 	if abs(_pan_delta_accumulation[axis]) >= 1.0:
-		scroll.value += sign(_pan_delta_accumulation[axis]) * _v_scroll.step
+		if not _current_editor_node:
+			scroll.value += sign(_pan_delta_accumulation[axis]) * _v_scroll.step
 		_pan_delta_accumulation[axis] -= sign(_pan_delta_accumulation[axis])
 
 #endregion
@@ -1347,9 +1343,8 @@ func _on_double_click_timeout() -> void:
 	_click_count = 0
 
 
-func _on_h_scroll_changed(value: float) -> void:
-	_h_scroll_position = int(value)
-	if _current_editor_node != null and _current_editor_node is LineEdit:
+func _on_h_scroll_value_changed(_value: float) -> void:
+	if _current_editor_node:
 		_finish_editing(false)
 	queue_redraw()
 
@@ -1362,7 +1357,7 @@ func _on_v_scroll_value_changed(value: float) -> void:
 	else:
 		_visible_rows_range = [0, _order.size()]
 
-	if _current_editor_node != null and _current_editor_node is LineEdit:
+	if _current_editor_node:
 		_finish_editing(false)
 	queue_redraw()
 
