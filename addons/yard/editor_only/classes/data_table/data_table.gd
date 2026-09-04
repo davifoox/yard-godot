@@ -596,6 +596,10 @@ func _is_numeric_value(value: Variant) -> bool:
 	return str_val.is_valid_float() or str_val.is_valid_int()
 
 
+func _get_page_row_count() -> int:
+	return maxi(1, floori((size.y - header_height) / row_height) if row_height > 0 else 10)
+
+
 func _start_cell_editing(row: StringName, col: StringName) -> void:
 	if not is_cell_valid(row, col):
 		return
@@ -1059,41 +1063,6 @@ func _handle_left_release(event: InputEventMouseButton) -> void:
 	_resizing_column = &""
 
 
-## Lets the CellType at (row, col) claim an InputEvent (true) or pass it
-## through (false). On claim, pins live-edit routing so follow-up motion or
-## release events keep reaching this cell even after the cursor leaves it.
-func _dispatch_cell_input(event: InputEvent, row: StringName, col: StringName) -> bool:
-	if row == &"" or col == &"":
-		return false
-
-	var column := get_column(col)
-	var cell_value: Variant = get_cell_value(row, col)
-	var rect := _get_cell_rect(row, col)
-	var result: Dictionary = column.get_cell_type().handle_input(event, rect, cell_value, column, _style)
-	if result.is_empty():
-		return false
-
-	if result.has(&"value"):
-		update_cell(row, col, result[&"value"])
-
-	if result.get(&"commit", false):
-		var old_value: Variant = _live_edit_start_value if row == _live_edit_row and col == _live_edit_col else cell_value
-		cell_edited.emit(row, col, old_value, get_cell_value(row, col))
-		_live_edit_row = &""
-		_live_edit_col = &""
-		_live_edit_start_value = null
-	else:
-		if _live_edit_row != row or _live_edit_col != col:
-			_live_edit_row = row
-			_live_edit_col = col
-			_live_edit_start_value = cell_value
-		if result.has(&"value"):
-			progress_changed.emit(row, col, result[&"value"])
-
-	queue_redraw()
-	return true
-
-
 func _handle_cell_click(mouse_pos: Vector2, event: InputEventMouseButton) -> void:
 	if _edited_col != &"":
 		_finish_editing(false)
@@ -1185,33 +1154,33 @@ func _handle_header_double_click(mouse_pos: Vector2) -> void:
 
 
 func _handle_key_input(event: InputEventKey) -> void:
-	var is_cell_focused := focused_row != &"" and focused_col != &""
-
-	# Only used by actions that call _navigate_to()
-	var is_shift := event.is_shift_pressed()
-	var is_ctrl_cmd := event.is_ctrl_pressed() or event.is_meta_pressed()
+	var is_any_cell_focused := focused_row != &"" and focused_col != &""
 	var focused_row_idx := _order.find(focused_row) if focused_row != &"" else -1
 	var focused_col_idx := _get_column_index(focused_col) if focused_col != &"" else -1
 
+	# EDIT CELL
 	if event.is_action_pressed(&"ui_accept"):
-		if not is_cell_focused:
+		if not is_any_cell_focused:
 			return
 		if not _dispatch_cell_input(event, focused_row, focused_col):
 			_start_cell_editing(focused_row, focused_col)
 
+	# SELECT ALL ROWS
 	elif event.is_action_pressed(&"ui_text_select_all"):
 		if _order.is_empty():
 			return
 		select_all_rows()
 		multiple_rows_selected.emit(selected_rows)
 
+	# UNSELECT
 	elif event.is_action_pressed(&"ui_cancel"):
 		if selected_rows.is_empty() and focused_row == &"":
 			return
 		set_selected_cell(&"", &"")
 
+	# SELECT FOCUSED CELL
 	elif event.is_action_pressed(&"ui_select"):
-		if not is_cell_focused:
+		if not is_any_cell_focused:
 			return
 		if selected_rows.has(focused_row):
 			selected_rows.erase(focused_row)
@@ -1220,55 +1189,63 @@ func _handle_key_input(event: InputEventKey) -> void:
 		_anchor_row = focused_row
 		cell_selected.emit(focused_row, focused_col)
 
+	# NAVIGATE TO FIRST ROW
 	elif event.is_action_pressed(&"ui_home"):
 		if _order.is_empty():
 			return
 		var new_row_idx := 0 if not _order.is_empty() else -1
 		var new_col_idx := 0 if not _columns.is_empty() else -1
-		_navigate_to(new_row_idx, new_col_idx, is_shift, is_ctrl_cmd)
+		_navigate_to(new_row_idx, new_col_idx, event)
 
+	# NAVIGATE TO LAST ROW
 	elif event.is_action_pressed(&"ui_end"):
 		if _order.is_empty():
 			return
 		var new_row_idx := _order.size() - 1
 		var new_col_idx := _columns.size() - 1
-		_navigate_to(new_row_idx, new_col_idx, is_shift, is_ctrl_cmd)
+		_navigate_to(new_row_idx, new_col_idx, event)
 
+	# NAVIGATE UP
 	elif event.is_action_pressed(&"ui_up"):
-		if not is_cell_focused:
+		if not is_any_cell_focused:
 			return
 		var new_row_idx := maxi(0, focused_row_idx - 1)
-		_navigate_to(new_row_idx, focused_col_idx, is_shift, is_ctrl_cmd)
+		_navigate_to(new_row_idx, focused_col_idx, event)
 
+	# NAVIGATE DOWN
 	elif event.is_action_pressed(&"ui_down"):
-		if not is_cell_focused:
+		if not is_any_cell_focused:
 			return
 		var new_row_idx := mini(_order.size() - 1, focused_row_idx + 1)
-		_navigate_to(new_row_idx, focused_col_idx, is_shift, is_ctrl_cmd)
+		_navigate_to(new_row_idx, focused_col_idx, event)
 
+	# NAVIGATE LEFT
 	elif event.is_action_pressed(&"ui_left"):
-		if not is_cell_focused:
+		if not is_any_cell_focused:
 			return
 		var new_col_idx: = maxi(0, focused_col_idx - 1)
-		_navigate_to(focused_row_idx, new_col_idx, is_shift, is_ctrl_cmd)
+		_navigate_to(focused_row_idx, new_col_idx, event)
 
+	# NAVIGATE RIGHT
 	elif event.is_action_pressed(&"ui_right"):
-		if not is_cell_focused:
+		if not is_any_cell_focused:
 			return
 		var new_col_idx := mini(_columns.size() - 1, focused_col_idx + 1)
-		_navigate_to(focused_row_idx, new_col_idx, is_shift, is_ctrl_cmd)
+		_navigate_to(focused_row_idx, new_col_idx, event)
 
+	# NAVIGATE 1 PAGE UP
 	elif event.is_action_pressed(&"ui_page_up"):
-		if not is_cell_focused:
+		if not is_any_cell_focused:
 			return
-		var new_row_idx := maxi(0, focused_row_idx - _page_row_count())
-		_navigate_to(new_row_idx, focused_col_idx, is_shift, is_ctrl_cmd)
+		var new_row_idx := maxi(0, focused_row_idx - _get_page_row_count())
+		_navigate_to(new_row_idx, focused_col_idx, event)
 
+	# NAVIGATE 1 PAGE DOWN
 	elif event.is_action_pressed(&"ui_page_down"):
-		if not is_cell_focused:
+		if not is_any_cell_focused:
 			return
-		var new_row_idx := mini(_order.size() - 1, focused_row_idx + _page_row_count())
-		_navigate_to(new_row_idx, focused_col_idx, is_shift, is_ctrl_cmd)
+		var new_row_idx := mini(_order.size() - 1, focused_row_idx + _get_page_row_count())
+		_navigate_to(new_row_idx, focused_col_idx, event)
 
 	else:
 		return
@@ -1277,11 +1254,7 @@ func _handle_key_input(event: InputEventKey) -> void:
 	get_viewport().set_input_as_handled()
 
 
-func _page_row_count() -> int:
-	return maxi(1, floori((size.y - header_height) / row_height) if row_height > 0 else 10)
-
-
-func _navigate_to(new_idx: int, new_col_idx: int, is_shift: bool, is_ctrl_cmd: bool) -> void:
+func _navigate_to(new_idx: int, new_col_idx: int, key_event: InputEventKey) -> void:
 	var new_row := _order[new_idx] if new_idx >= 0 and new_idx < _order.size() else &""
 	var new_col := _columns[new_col_idx].identifier if new_col_idx >= 0 and new_col_idx < _columns.size() else &""
 	var old_row := focused_row
@@ -1290,7 +1263,7 @@ func _navigate_to(new_idx: int, new_col_idx: int, is_shift: bool, is_ctrl_cmd: b
 	focused_row = new_row
 	focused_col = new_col
 
-	if is_shift:
+	if key_event.is_shift_pressed():
 		if _anchor_row == &"":
 			_anchor_row = old_row if old_row != &"" else (_order[0] if not _order.is_empty() else &"")
 		if focused_row != &"":
@@ -1302,15 +1275,14 @@ func _navigate_to(new_idx: int, new_col_idx: int, is_shift: bool, is_ctrl_cmd: b
 					selected_rows.append(_order[i])
 			if selected_rows.size() > 1:
 				multiple_rows_selected.emit(selected_rows)
-	elif is_ctrl_cmd:
+	elif key_event.is_command_or_control_pressed():
 		pass
 	else:
+		selected_rows.clear()
 		if focused_row != &"":
-			selected_rows.clear()
 			selected_rows.append(focused_row)
 			_anchor_row = focused_row
 		else:
-			selected_rows.clear()
 			_anchor_row = &""
 
 	if focused_row != &"":
@@ -1331,6 +1303,41 @@ func _apply_pan_axis(delta: float, scroll: ScrollBar, axis: int) -> void:
 		if not _current_editor_node:
 			scroll.value += sign(_pan_delta_accumulation[axis]) * _v_scroll.step
 		_pan_delta_accumulation[axis] -= sign(_pan_delta_accumulation[axis])
+
+
+## Lets the CellType at (row, col) claim an InputEvent (true) or pass it
+## through (false). On claim, pins live-edit routing so follow-up motion or
+## release events keep reaching this cell even after the cursor leaves it.
+func _dispatch_cell_input(event: InputEvent, row: StringName, col: StringName) -> bool:
+	if row == &"" or col == &"":
+		return false
+
+	var column := get_column(col)
+	var cell_value: Variant = get_cell_value(row, col)
+	var rect := _get_cell_rect(row, col)
+	var result: Dictionary = column.get_cell_type().handle_input(event, rect, cell_value, column, _style)
+	if result.is_empty():
+		return false
+
+	if result.has(&"value"):
+		update_cell(row, col, result[&"value"])
+
+	if result.get(&"commit", false):
+		var old_value: Variant = _live_edit_start_value if row == _live_edit_row and col == _live_edit_col else cell_value
+		cell_edited.emit(row, col, old_value, get_cell_value(row, col))
+		_live_edit_row = &""
+		_live_edit_col = &""
+		_live_edit_start_value = null
+	else:
+		if _live_edit_row != row or _live_edit_col != col:
+			_live_edit_row = row
+			_live_edit_col = col
+			_live_edit_start_value = cell_value
+		if result.has(&"value"):
+			progress_changed.emit(row, col, result[&"value"])
+
+	queue_redraw()
+	return true
 
 #endregion
 
