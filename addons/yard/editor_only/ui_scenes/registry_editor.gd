@@ -38,9 +38,9 @@ const RegistriesItemList := Namespace.RegistriesItemList
 const RegistryTableView := Namespace.RegistryTableView
 const NewRegistryDialog := Namespace.NewRegistryDialog
 const AnyIcon := Namespace.AnyIcon
-const FuzzySearch := Namespace.FuzzySearch
+const FuzzySearchYard := Namespace.FuzzySearchYard
 const YardLogger := Namespace.YardLogger
-const FuzzySearchResult := FuzzySearch.FuzzySearchResult
+const FuzzySearchYardResult := FuzzySearchYard.FuzzySearchYardResult
 const BUILTIN_RESOURCE_PROPERTIES: Array[StringName] = RegistryCacheData.BUILTIN_RESOURCE_PROPERTIES
 const STRINGID_COLUMN := RegistryTableView.STRINGID_COLUMN
 const UID_COLUMN := RegistryTableView.UID_COLUMN
@@ -65,7 +65,7 @@ var _editor_state_data: EditorStateData
 var _session_closed_uids: Array[String] = [] # Array[uid]
 var _file_dialog: EditorFileDialog
 var _current_registry_uid: String = ""
-var _fuz := FuzzySearch.new()
+var _fuz := FuzzySearchYard.new()
 
 @onready var file_menu_button: MenuButton = %FileMenuButton
 @onready var edit_menu_button: MenuButton = %EditMenuButton
@@ -271,10 +271,10 @@ func _get_uids_to_show(all_uids: Array[String], display_name_by_uid: Dictionary)
 
 	_fuz.set_query(filter_text)
 	var targets := PackedStringArray(all_uids.map(func(uid: String) -> String: return display_name_by_uid[uid]))
-	var fuzzy_results: Array[FuzzySearchResult] = []
+	var fuzzy_results: Array[FuzzySearchYardResult] = []
 	_fuz.search_all(targets, fuzzy_results)
 	var result: Array[String] = []
-	for r: FuzzySearchResult in fuzzy_results:
+	for r: FuzzySearchYardResult in fuzzy_results:
 		result.append(all_uids[r.original_index])
 	return result
 

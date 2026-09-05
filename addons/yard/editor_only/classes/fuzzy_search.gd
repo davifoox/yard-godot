@@ -7,16 +7,16 @@
 # Original C++ class by Adam Johnston (https://github.com/a-johnston).
 
 extends RefCounted
-## Reproduced API:  FuzzySearch, FuzzySearchToken, FuzzyTokenMatch, FuzzySearchResult.
-## Note: If `class_name FuzzySearch` is enabled, inner classes can access static
+## Reproduced API:  FuzzySearchYard, FuzzySearchYardToken, FuzzyTokenMatch, FuzzySearchYardResult.
+## Note: If `class_name FuzzySearchYard` is enabled, inner classes can access static
 ## helpers directly and the external namespace indirections can be removed.
 
-#class_name FuzzySearch
+#class_name FuzzySearchYard
 
 const CULL_FACTOR: float = 0.1
 const CULL_CUTOFF: float = 30.0
 
-var tokens: Array[FuzzySearchToken] = []
+var tokens: Array[FuzzySearchYardToken] = []
 var case_sensitive: bool = false
 
 var start_offset: int = 0
@@ -63,21 +63,21 @@ func set_query(p_query: String, p_case_sensitive: bool = (not _is_lowercase(p_qu
 	case_sensitive = p_case_sensitive
 
 	for s in p_query.split(" ", false):
-		var t := FuzzySearchToken.new()
+		var t := FuzzySearchYardToken.new()
 		t.idx = tokens.size()
 		t.string = s if p_case_sensitive else s.to_lower()
 		tokens.append(t)
 
 	# Prioritize matching longer tokens before shorter ones since match overlaps are not accepted.
 	tokens.sort_custom(
-		func(a: FuzzySearchToken, b: FuzzySearchToken) -> bool:
+		func(a: FuzzySearchYardToken, b: FuzzySearchYardToken) -> bool:
 			if a.string.length() == b.string.length():
 				return a.idx < b.idx
 			return a.string.length() > b.string.length()
 	)
 
 
-func search(p_target: String, p_result: FuzzySearchResult) -> bool:
+func search(p_target: String, p_result: FuzzySearchYardResult) -> bool:
 	p_result._reset_for_search(p_target, p_target.rfind("/"), max_misses)
 
 	var adjusted_target := p_target if case_sensitive else p_target.to_lower()
@@ -118,11 +118,11 @@ func search(p_target: String, p_result: FuzzySearchResult) -> bool:
 	return true
 
 
-func search_all(p_targets: PackedStringArray, p_results: Array[FuzzySearchResult]) -> void:
+func search_all(p_targets: PackedStringArray, p_results: Array[FuzzySearchYardResult]) -> void:
 	p_results.clear()
 
 	for i in range(p_targets.size()):
-		var r := FuzzySearchResult.new()
+		var r := FuzzySearchYardResult.new()
 		r.original_index = i
 		if search(p_targets[i], r):
 			p_results.append(r)
@@ -130,7 +130,7 @@ func search_all(p_targets: PackedStringArray, p_results: Array[FuzzySearchResult
 	_sort_and_filter(p_results)
 
 
-static func _remove_low_scores(p_results: Array[FuzzySearchResult], p_cull_score: float) -> void:
+static func _remove_low_scores(p_results: Array[FuzzySearchYardResult], p_cull_score: float) -> void:
 	# Removes all results with score < p_cull_score in-place (two pointers).
 	var i := 0
 	var j := p_results.size() - 1
@@ -151,7 +151,7 @@ static func _remove_low_scores(p_results: Array[FuzzySearchResult], p_cull_score
 	p_results.resize(j + 1)
 
 
-func _sort_and_filter(p_results: Array[FuzzySearchResult]) -> void:
+func _sort_and_filter(p_results: Array[FuzzySearchYardResult]) -> void:
 	if p_results.is_empty():
 		return
 
@@ -168,7 +168,7 @@ func _sort_and_filter(p_results: Array[FuzzySearchResult]) -> void:
 
 	# Sort on (score desc, length asc, alphanumeric asc) for consistent ordering.
 	p_results.sort_custom(
-		func(a: FuzzySearchResult, b: FuzzySearchResult) -> bool:
+		func(a: FuzzySearchYardResult, b: FuzzySearchYardResult) -> bool:
 			if a.score == b.score:
 				if a.target.length() == b.target.length():
 					return a.target < b.target
@@ -185,9 +185,9 @@ func _is_lowercase(s: String) -> bool:
 	return s == s.to_lower()
 
 
-class FuzzySearchToken:
+class FuzzySearchYardToken:
 	const Namespace := preload("res://addons/yard/editor_only/namespace.gd")
-	const FuzzySearch := Namespace.FuzzySearch
+	const FuzzySearchYard := Namespace.FuzzySearchYard
 
 	var idx: int = -1
 	var string: String = ""
@@ -215,7 +215,7 @@ class FuzzySearchToken:
 
 		for i in range(string.length()):
 			var cp := string.unicode_at(i)
-			var new_offset := FuzzySearch._find_codepoint(p_target, cp, offset)
+			var new_offset := FuzzySearchYard._find_codepoint(p_target, cp, offset)
 
 			if new_offset < 0:
 				miss_budget -= 1
@@ -239,7 +239,7 @@ class FuzzySearchToken:
 
 class FuzzyTokenMatch:
 	const Namespace := preload("res://addons/yard/editor_only/namespace.gd")
-	const FuzzySearch := Namespace.FuzzySearch
+	const FuzzySearchYard := Namespace.FuzzySearchYard
 
 	var score: int = 0
 	var substrings: Array[Vector2i] = [] # x: start index, y: length
@@ -263,7 +263,7 @@ class FuzzyTokenMatch:
 		substrings.append(Vector2i(p_substring_start, p_substring_length))
 		matched_length += p_substring_length
 		var substring_interval := Vector2i(p_substring_start, p_substring_start + p_substring_length - 1)
-		interval = FuzzySearch._extend_interval(interval, substring_interval)
+		interval = FuzzySearchYard._extend_interval(interval, substring_interval)
 
 
 	func get_miss_count() -> int:
@@ -271,7 +271,7 @@ class FuzzyTokenMatch:
 
 
 	func intersects(p_other_interval: Vector2i) -> bool:
-		if not FuzzySearch._is_valid_interval(interval) or not FuzzySearch._is_valid_interval(p_other_interval):
+		if not FuzzySearchYard._is_valid_interval(interval) or not FuzzySearchYard._is_valid_interval(p_other_interval):
 			return false
 		return interval.y >= p_other_interval.x and interval.x <= p_other_interval.y
 
@@ -285,9 +285,9 @@ class FuzzyTokenMatch:
 		return false
 
 
-class FuzzySearchResult:
+class FuzzySearchYardResult:
 	const Namespace := preload("res://addons/yard/editor_only/namespace.gd")
-	const FuzzySearch := Namespace.FuzzySearch
+	const FuzzySearchYard := Namespace.FuzzySearchYard
 
 	var target: String = ""
 	var score: int = 0
@@ -335,8 +335,8 @@ class FuzzySearchResult:
 				substring_score *= 2
 
 			# Score matches on a word boundary higher than matches within a word.
-			if FuzzySearch._is_word_boundary(target, substring.x - 1) \
-			or FuzzySearch._is_word_boundary(target, substring.x + substring.y):
+			if FuzzySearchYard._is_word_boundary(target, substring.x - 1) \
+			or FuzzySearchYard._is_word_boundary(target, substring.x + substring.y):
 				substring_score += 4
 
 			# Score exact query matches higher than non-compact subsequence matches.
@@ -348,7 +348,7 @@ class FuzzySearchResult:
 
 	func add_token_match(p_match: FuzzyTokenMatch) -> void:
 		score += p_match.score
-		match_interval = FuzzySearch._extend_interval(match_interval, p_match.interval)
+		match_interval = FuzzySearchYard._extend_interval(match_interval, p_match.interval)
 		miss_budget -= p_match.get_miss_count()
 		token_matches.append(p_match)
 
