@@ -42,7 +42,11 @@ func _enter_tree() -> void:
 	_registry_editor = REGISTRY_EDITOR_SCENE.instantiate()
 	EditorInterface.get_editor_main_screen().add_child(_registry_editor)
 
-	_reimport_icons()
+	## _reimport_icons() disabled on Godot 4.8-dev4: reimport_files() fails every
+	## time ("Can't find file... during file reimport") without ever actually fixing
+	## the icon size, so it just reappears on every reload with no real benefit --
+	## purely cosmetic (tab icon sharpness at non-default editor scales).
+	# _reimport_icons()
 	_make_visible(false)
 
 
